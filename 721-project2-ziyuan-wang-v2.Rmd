@@ -1,0 +1,172 @@
+---
+title: "Project 2 – Air Pollution and Sickle Cell Disease"
+author: "Ziyuan Wang"
+output:
+  word_document:
+    toc: false
+---
+
+```{r setup, include=FALSE}
+# Load packages
+library(tidyverse)
+library(lubridate)
+
+# Function: process air pollution data
+process_air <- function(df) {
+  df %>%
+    # Rename pollutant columns
+    rename(
+      date = Date,
+      co   = `Daily Max 8-hour CO Concentration`,
+      pm25 = `Daily Mean PM2.5 Concentration`,
+      o3   = `Daily Max 8-hour Ozone Concentration`
+    ) %>%
+    # Convert date to Date class
+    mutate(date = mdy(date)) %>%
+    # Average multiple measurements on the same day
+    group_by(date) %>%
+    summarise(
+      co   = mean(co,   na.rm = TRUE),
+      pm25 = mean(pm25, na.rm = TRUE),
+      o3   = mean(o3,   na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    distinct() %>%
+    # Set negative concentrations to zero
+    mutate(across(c(co, pm25, o3), ~ ifelse(.x < 0, 0, .x)))
+}
+
+# Read raw data for 2018–2020
+AQ18_raw <- read_csv("data/AQ_2018.csv")
+AQ19_raw <- read_csv("data/AQ_2019.csv")
+AQ20_raw <- read_csv("data/AQ_2020.csv")
+
+# Apply processing function and add year variable
+AQ18 <- AQ18_raw %>% process_air() %>% mutate(year = 2018)
+AQ19 <- AQ19_raw %>% process_air() %>% mutate(year = 2019)
+AQ20 <- AQ20_raw %>% process_air() %>% mutate(year = 2020)
+
+# Combine three years into one data set
+alldata <- bind_rows(AQ18, AQ19, AQ20)
+```
+
+# Introduction
+
+Sickle cell disease (SCD) is a genetic blood disorder that can lead to
+pain crises and other complications when blood vessels become blocked.
+Some studies suggest that air pollution may trigger or worsen these
+events. In this project, we use daily air quality measurements collected
+at the RDU airport monitor from 2018 to 2020. Our goal is simple: clean
+the raw data, summarise the main pollutants (CO, PM2.5, and ozone), and
+create a few plots that help us understand how these pollutants vary
+across months and years.
+
+# Methods
+
+Each year of data contains daily pollutant measurements, and sometimes
+multiple readings for the same day. I wrote a small function to clean
+the data by renaming variables, fixing the date format, averaging
+duplicate measurements, removing duplicates, and setting any negative
+values to zero. After processing each year separately, I combined all
+three years into one dataset. I then summarised pollutant levels by
+month and created two main visualisations: one for CO and ozone with
+confidence intervals, and one for PM2.5 by year.
+
+# Results
+
+## Monthly CO and O3 with 95% confidence intervals
+
+```{r plot1, echo=FALSE}
+plot1_data <- alldata %>%
+  mutate(
+    month = month(date, label = TRUE, abbr = TRUE)
+  ) %>%
+  pivot_longer(
+    cols = c(co, o3),
+    names_to = "pollutant",
+    values_to = "value"
+  ) %>%
+  group_by(month, pollutant) %>%
+  summarise(
+    mean = mean(value, na.rm = TRUE),
+    se   = sd(value, na.rm = TRUE) / sqrt(sum(!is.na(value))),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    lower = mean - 1.96 * se,
+    upper = mean + 1.96 * se
+  )
+
+ggplot(plot1_data,
+       aes(x = month, y = mean, color = pollutant, group = pollutant)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  labs(
+    title = "Monthly Average CO and O3 Concentrations (2018–2020)",
+    x = "Month",
+    y = "Concentration",
+    color = "Pollutant"
+  ) +
+  theme_bw()
+```
+
+The first plot shows that ozone tends to peak during the warmer months,
+while CO is generally higher during colder months. The confidence
+intervals around the monthly means are fairly narrow, which suggests
+that the averages are estimated with good stability.
+
+## Monthly PM2.5 by year
+
+```{r plot2, echo=FALSE}
+plot2_data <- alldata %>%
+  mutate(
+    month = month(date, label = TRUE, abbr = TRUE)
+  ) %>%
+  group_by(year, month) %>%
+  summarise(
+    pm25_mean = mean(pm25, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+ggplot(plot2_data,
+       aes(x = month, y = pm25_mean,
+           color = factor(year), group = year)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Monthly PM2.5 Concentrations by Year",
+    x = "Month",
+    y = "PM2.5 Concentration",
+    color = "Year"
+  ) +
+  theme_bw()
+```
+
+The second plot shows monthly PM2.5 patterns for each year. The levels
+fluctuate through the year, with some higher values in winter and early
+spring. Data for 2020 only extend through April, so that year’s pattern
+is incomplete but still useful for comparison with 2018 and 2019.
+
+# Discussion
+
+The cleaned data reveal clear seasonal trends for all three pollutants.
+Ozone is highest in warmer months, CO tends to be higher in colder
+months, and PM2.5 shows modest seasonal variation with some differences
+across years. These patterns may matter for people with SCD because
+certain pollutants could be more elevated during specific times of the
+year.
+
+This analysis has a few limitations. The pollution measurements come
+from a single monitoring site and may not capture spatial variation
+across the entire county. In addition, the 2020 data are only available
+through April, which limits the ability to compare full-year patterns.
+Even so, the processed dataset and plots provide a useful starting point
+for future work that links air pollution with health outcomes in people
+living with SCD.
+
+# Appendix
+
+```{r sessioninfo, echo=FALSE}
+sessionInfo()
+```
